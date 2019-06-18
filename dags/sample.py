@@ -10,6 +10,7 @@ from airflow.operators.subdag_operator import SubDagOperator
 args = {
     'owner': 'airflow',
     'start_date': airflow.utils.dates.days_ago(2),
+    'provide_context': True,
 }
 
 
@@ -17,9 +18,9 @@ DAG_NAME = __file__.split("/")[-1].replace(".py", "")
 
 
 def do_something(**kwargs):
-    ti = kwargs.get("ti")
     response = kwargs.get("response")
-    print(ti.__class__)
+    print("**kwargs")
+    print(kwargs)
     return response
 
 
@@ -47,8 +48,7 @@ print_date_task = PythonOperator(
 start >> print_date_task
 
 
-## subdag
-def get_sub_task(parent_dag, child_dag, args) -> DAG:
+def get_sub_task(parent_dag, child_dag, args):
     with DAG(
         dag_id="%s.%s" % (parent_dag, child_dag),
         default_args=args,
@@ -57,7 +57,10 @@ def get_sub_task(parent_dag, child_dag, args) -> DAG:
         for sleep_sec in sleep_seconds:
             task = BashOperator(
                 task_id="sleep_%s" % sleep_sec,
-                bash_command="sleep %s" % sleep_sec,
+                bash_command="sleep {num} && echo sleep_{num}".format(
+                    num=sleep_sec
+                ),
+                xcom_push=True
             )
             task
         return dag
@@ -70,3 +73,27 @@ sub_task = SubDagOperator(
 )
 
 start >> sub_task
+
+
+def pull_xcom(**kwargs):
+    ti = kwargs.get("ti")
+    dag_id = kwargs.get("dag_id")
+    task_id = kwargs.get("task_id")
+    key = kwargs.get("key")
+
+    res = ti.xcom_pull(dag_id=dag_id, task_ids=task_id, key=key)
+    print(res)
+    return res
+
+
+puller = PythonOperator(
+    task_id="puller",
+    python_callable=pull_xcom,
+    op_kwargs={
+        "dag_id": "sample.sub_task",
+        "task_id": "sleep_1"
+    },
+    dag=dag
+)
+
+start >> puller
